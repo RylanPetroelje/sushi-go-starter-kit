@@ -35,6 +35,21 @@ CARD_NAMES = {
     "Chopsticks": "Chopsticks",
 }
 
+DECK_COUNTS = {
+    "Tempura": 14,
+    "Sashimi": 14,
+    "Dumpling": 14,
+    "Maki Roll (1)": 6,
+    "Maki Roll (2)": 12,
+    "Maki Roll (3)": 8,
+    "Egg Nigiri": 5,
+    "Salmon Nigiri": 10,
+    "Squid Nigiri": 5,
+    "Pudding": 10,
+    "Wasabi": 6,
+    "Chopsticks": 4,
+}
+
 
 @dataclass
 class GameState:
@@ -156,6 +171,30 @@ class SushiGoClient:
                     for c in self.state.played_cards
                 )
 
+    def estimate_remaining_probability(self, card_name: str) -> float:
+        """
+        Estimate probability of seeing at least one of card_name later this round.
+        """
+
+        state = self.state
+        total_seen = state.played_cards + state.hand
+
+        total_in_deck = DECK_COUNTS.get(card_name, 0)
+        seen_count = total_seen.count(card_name)
+
+        remaining = max(total_in_deck - seen_count, 0)
+
+        # Rough estimate of cards we'll still see this round
+        cards_left_in_round = max(0, 10 - state.turn)
+
+        if remaining <= 0 or cards_left_in_round == 0:
+            return 0.0
+
+        # Simple probability approximation
+        # P(seen at least once) ≈ 1 - (no hit probability)
+        prob_not_seen = (1 - remaining / sum(DECK_COUNTS.values())) ** cards_left_in_round
+        return 1 - prob_not_seen
+
     def choose_card(self, hand: list[str]) -> int:
         """
         Choose which card to play.
@@ -169,34 +208,132 @@ class SushiGoClient:
         Returns:
             Index of the card to play (0-based)
         """
-        # Simple priority-based strategy
-        priority = [
-            "Squid Nigiri",  # 3 points, or 9 with wasabi
-            "Salmon Nigiri",  # 2 points, or 6 with wasabi
-            "Maki Roll (3)",  # 3 maki rolls
-            "Maki Roll (2)",  # 2 maki rolls
-            "Tempura",  # 5 points per pair
-            "Sashimi",  # 10 points per set of 3
-            "Dumpling",  # Increasing value
-            "Wasabi",  # Triples next nigiri
-            "Egg Nigiri",  # 1 point, or 3 with wasabi
-            "Pudding",  # End game scoring
-            "Maki Roll (1)",  # 1 maki roll
-            "Chopsticks",  # Play 2 cards next turn
-        ]
+        # # Simple priority-based strategy
+        # priority = [
+        #     "Squid Nigiri",  # 3 points, or 9 with wasabi
+        #     "Salmon Nigiri",  # 2 points, or 6 with wasabi
+        #     "Maki Roll (3)",  # 3 maki rolls
+        #     "Maki Roll (2)",  # 2 maki rolls
+        #     "Tempura",  # 5 points per pair
+        #     "Sashimi",  # 10 points per set of 3
+        #     "Dumpling",  # Increasing value
+        #     "Wasabi",  # Triples next nigiri
+        #     "Egg Nigiri",  # 1 point, or 3 with wasabi
+        #     "Pudding",  # End game scoring
+        #     "Maki Roll (1)",  # 1 maki roll
+        #     "Chopsticks",  # Play 2 cards next turn
+        # ]
 
-        # If we have wasabi, prioritize nigiri
-        if self.state and self.state.has_unused_wasabi:
-            for nigiri in ["Squid Nigiri", "Salmon Nigiri", "Egg Nigiri"]:
-                if nigiri in hand:
-                    return hand.index(nigiri)
+        # # If we have wasabi, prioritize nigiri
+        # if self.state and self.state.has_unused_wasabi:
+        #     for nigiri in ["Squid Nigiri", "Salmon Nigiri", "Egg Nigiri"]:
+        #         if nigiri in hand:
+        #             return hand.index(nigiri)
 
-        # Otherwise use priority list
-        for card in priority:
-            if card in hand:
-                return hand.index(card)
+        # # Otherwise use priority list
+        # for card in priority:
+        #     if card in hand:
+        #         return hand.index(card)
 
-        # Fallback: random
+        # # Fallback: random
+        # return random.randint(0, len(hand) - 1)
+        """
+        Strategic AI:
+        - Early Sashimi commitment
+        - Strong Dumpling scaling
+        - Complete Tempura pairs
+        - Proper Wasabi usage
+        - Grab pudding safely
+        """
+
+        state = self.state
+        played = state.played_cards
+
+        # ---- Count what we've already built ----
+        dumplings = played.count("Dumpling")
+        sashimi = played.count("Sashimi")
+        tempura = played.count("Tempura")
+        puddings = state.puddings
+
+        # ---- 1. If we have unused Wasabi, play best Nigiri ----
+        # If we already have unused Wasabi
+        if state.has_unused_wasabi:
+
+            # Always take Squid
+            if "Squid Nigiri" in hand:
+                return hand.index("Squid Nigiri")
+
+            # If probability of future Squid is low, settle
+            p_squid = self.estimate_remaining_probability("Squid Nigiri")
+
+            if p_squid < 0.25:
+                for nigiri in ["Salmon Nigiri", "Egg Nigiri"]:
+                    if nigiri in hand:
+                        return hand.index(nigiri)
+
+        # If considering playing Wasabi
+        if "Wasabi" in hand:
+
+            p_squid = self.estimate_remaining_probability("Squid Nigiri")
+            p_salmon = self.estimate_remaining_probability("Salmon Nigiri")
+            p_egg = self.estimate_remaining_probability("Egg Nigiri")
+
+            # Expected value of playing Wasabi
+            ev = (
+                p_squid * 9 +
+                (1 - p_squid) * p_salmon * 6 +
+                (1 - p_squid) * (1 - p_salmon) * p_egg * 3
+            )
+
+            # Since Wasabi costs a card, compare against average card value (~2.5)
+            if ev > 3.5:  # threshold tuned experimentally
+                return hand.index("Wasabi")
+
+        # ---- 2. Early round Sashimi commitment ----
+        # Only pursue in first half of round
+        if state.turn <= 4:
+            if sashimi < 3 and hand.count("Sashimi") > 0:
+                # Only commit if we already have 1 OR multiple in hand
+                if sashimi >= 1 or hand.count("Sashimi") >= 2:
+                    return hand.index("Sashimi")
+
+        # ---- 3. Complete Tempura pairs ----
+        if tempura % 2 == 1 and "Tempura" in hand:
+            return hand.index("Tempura")
+
+        # ---- 4. Strong Dumpling scaling (best consistent strategy) ----
+        if dumplings < 5 and "Dumpling" in hand:
+            return hand.index("Dumpling")
+
+        # ---- 5. Grab Pudding safely (early or mid round) ----
+        if state.round <= 2 and "Pudding" in hand:
+            return hand.index("Pudding")
+
+        # ---- 6. Wasabi setup (only if nigiri likely) ----
+        if "Wasabi" in hand and any(
+            c in hand for c in ["Squid Nigiri", "Salmon Nigiri"]
+        ):
+            return hand.index("Wasabi")
+
+        # ---- 7. High-value Nigiri fallback ----
+        for nigiri in ["Squid Nigiri", "Salmon Nigiri", "Egg Nigiri"]:
+            if nigiri in hand:
+                return hand.index(nigiri)
+
+        # ---- 8. Tempura starter ----
+        if "Tempura" in hand:
+            return hand.index("Tempura")
+
+        # ---- 9. Light Maki only if nothing better ----
+        for maki in ["Maki Roll (3)", "Maki Roll (2)", "Maki Roll (1)"]:
+            if maki in hand:
+                return hand.index(maki)
+
+        # ---- 10. Chopsticks last ----
+        if "Chopsticks" in hand:
+            return hand.index("Chopsticks")
+
+        # Fallback
         return random.randint(0, len(hand) - 1)
 
     def handle_message(self, message: str):
