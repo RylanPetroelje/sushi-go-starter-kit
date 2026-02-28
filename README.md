@@ -46,7 +46,7 @@ curl -O http://joes-macbook.local:9090/sushi-go-test.tar && docker load < sushi-
 Then start it:
 
 ```bash
-docker run -p 7878:7878 -p 8080:8080 sushi-go-test
+docker run -it -p 7878:7878 -p 8080:8080 sushi-go-test
 ```
 
 - **Port 7878** — TCP game port (where your bot connects)
