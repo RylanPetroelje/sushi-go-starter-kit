@@ -51,10 +51,14 @@ class GameClient:
 
     def recv_message(self) -> ServerMessage:
         """Receive and parse one server message, updating state."""
-        line = self.conn.recv_line()
-        msg = parse_server_message(line)
-        self.state.update(msg)
-        return msg
+        while True:
+            line = self.conn.recv_line()
+            try:
+                msg = parse_server_message(line)
+            except ValueError:
+                continue  # skip banner/non-protocol lines
+            self.state.update(msg)
+            return msg
 
     # -- High-level commands --
 
@@ -163,10 +167,14 @@ class AsyncGameClient:
         await self.conn.send_line(cmd)
 
     async def recv_message(self) -> ServerMessage:
-        line = await self.conn.recv_line()
-        msg = parse_server_message(line)
-        self.state.update(msg)
-        return msg
+        while True:
+            line = await self.conn.recv_line()
+            try:
+                msg = parse_server_message(line)
+            except ValueError:
+                continue  # skip banner/non-protocol lines
+            self.state.update(msg)
+            return msg
 
     async def join(self, game_id: str, player_name: str) -> ServerMessage:
         self.state.player_name = player_name

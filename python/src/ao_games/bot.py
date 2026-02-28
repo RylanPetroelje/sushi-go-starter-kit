@@ -71,11 +71,20 @@ class Bot(ABC):
         """Called when the tournament is over."""
 
 
+def _recv_message(conn: SyncConnection):
+    """Read lines from the connection, skipping the server welcome banner."""
+    while True:
+        line = conn.recv_line()
+        try:
+            return parse_server_message(line)
+        except ValueError:
+            continue
+
+
 def _run_game_loop(bot: Bot, conn: SyncConnection, state: GameState) -> GameState:
     """Internal: run the message loop for a single game."""
     while True:
-        line = conn.recv_line()
-        msg = parse_server_message(line)
+        msg = _recv_message(conn)
         state.update(msg)
 
         match msg:
@@ -135,12 +144,12 @@ def run_bot(
 
         # Join
         conn.send_line(format_join(game_id, name))
-        msg = parse_server_message(conn.recv_line())
+        msg = _recv_message(conn)
         state.update(msg)
 
         # Ready
         conn.send_line(format_ready())
-        msg = parse_server_message(conn.recv_line())
+        msg = _recv_message(conn)
         state.update(msg)
 
         return _run_game_loop(bot, conn, state)
@@ -177,7 +186,7 @@ def run_tournament_bot(
 
         # Join tournament
         conn.send_line(format_tourney(tournament_id, name))
-        msg = parse_server_message(conn.recv_line())
+        msg = _recv_message(conn)
         state.update(msg)
 
         while True:
@@ -191,12 +200,12 @@ def run_tournament_bot(
 
                     # Join the match game
                     conn.send_line(format_tjoin(mt))
-                    join_msg = parse_server_message(conn.recv_line())
+                    join_msg = _recv_message(conn)
                     state.update(join_msg)
 
                     # Ready up
                     conn.send_line(format_ready())
-                    ready_msg = parse_server_message(conn.recv_line())
+                    ready_msg = _recv_message(conn)
                     state.update(ready_msg)
 
                     # Play the game
