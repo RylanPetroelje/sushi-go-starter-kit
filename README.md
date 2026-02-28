@@ -36,6 +36,13 @@ First, load the server image from the LAN:
 curl https://joes-macbook.tail10906.ts.net/sushi-go-test.tar | docker load
 ```
 
+or 
+
+```bash
+curl http://joes-macbook.local:9090/sushi-go-test.tar | docker load
+```
+
+
 Then start it:
 
 ```bash
